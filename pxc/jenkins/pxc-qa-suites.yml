@@ -1,0 +1,15 @@
+- job:
+    name: pxc-qa-suites
+    project-type: pipeline
+    description: |
+        Runs Percona-QA/pxc-qa (qa_framework.py) suites against a PXC binary tarball on EC2 via molecule.
+        Do not edit this job through the web!
+    pipeline-scm:
+      scm:
+        - git:
+            url: https://github.com/Percona-Lab/jenkins-pipelines.git
+            branches:
+            - 'master'
+            wipe-workspace: true
+      lightweight-checkout: true
+      script-path: pxc/jenkins/pxc-qa-suites.groovy
