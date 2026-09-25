@@ -74,28 +74,32 @@ pipeline {
     label 'deb12-x64-min'
   }
   environment {
+    // String parameters are trimmed: a stray space (e.g. " pxc-qa-suites") breaks git refs and URLs.
     PATH = '/usr/local/bin:/usr/bin:/usr/local/sbin:/usr/sbin:/home/ec2-user/.local/bin';
     MOLECULE_DIR = "molecule/pxc-qa-suites/";
-    PXC_VERSION = "${params.PXC_VERSION}";
-    PXC_RHEL_GLIBC_VERSION = "${params.PXC_RHEL_GLIBC_VERSION}";
-    PXC_DEBIAN_GLIBC_VERSION = "${params.PXC_DEBIAN_GLIBC_VERSION}";
-    PXC_TARBALL_URL_RHEL = "${params.PXC_TARBALL_URL_RHEL}";
-    PXC_TARBALL_URL_DEB = "${params.PXC_TARBALL_URL_DEB}";
-    PXC_LOWER_VERSION = "${params.PXC_LOWER_VERSION}";
-    PXC_QA_REPO = "${params.PXC_QA_REPO}";
-    PXC_QA_BRANCH = "${params.PXC_QA_BRANCH}";
-    PSTRESS_BRANCH = "${params.PSTRESS_BRANCH}";
-    TESTING_BRANCH = "${params.TESTING_BRANCH}";
-    QA_SUITES = "${params.QA_SUITES}";
-    QA_TESTS = "${params.QA_TESTS}";
-    DISABLED_TESTS = "${params.DISABLED_TESTS}";
+    PXC_VERSION = "${params.PXC_VERSION?.trim() ?: ''}";
+    PXC_RHEL_GLIBC_VERSION = "${params.PXC_RHEL_GLIBC_VERSION?.trim() ?: ''}";
+    PXC_DEBIAN_GLIBC_VERSION = "${params.PXC_DEBIAN_GLIBC_VERSION?.trim() ?: ''}";
+    PXC_TARBALL_URL_RHEL = "${params.PXC_TARBALL_URL_RHEL?.trim() ?: ''}";
+    PXC_TARBALL_URL_DEB = "${params.PXC_TARBALL_URL_DEB?.trim() ?: ''}";
+    PXC_LOWER_VERSION = "${params.PXC_LOWER_VERSION?.trim() ?: ''}";
+    PXC_QA_REPO = "${params.PXC_QA_REPO?.trim() ?: ''}";
+    PXC_QA_BRANCH = "${params.PXC_QA_BRANCH?.trim() ?: ''}";
+    PSTRESS_BRANCH = "${params.PSTRESS_BRANCH?.trim() ?: ''}";
+    PERCONA_QA_REPO = "${params.PERCONA_QA_REPO?.trim() ?: ''}";
+    PERCONA_QA_BRANCH = "${params.PERCONA_QA_BRANCH?.trim() ?: ''}";
+    TESTING_GIT_ACCOUNT = "${params.TESTING_GIT_ACCOUNT?.trim() ?: ''}";
+    TESTING_BRANCH = "${params.TESTING_BRANCH?.trim() ?: ''}";
+    QA_SUITES = "${params.QA_SUITES?.trim() ?: ''}";
+    QA_TESTS = "${params.QA_TESTS?.trim() ?: ''}";
+    DISABLED_TESTS = "${params.DISABLED_TESTS?.trim() ?: ''}";
     ENCRYPTION_RUN = "${params.ENCRYPTION_RUN}";
     QA_DEBUG = "${params.QA_DEBUG}";
-    NUMBER_OF_WORKERS = "${params.NUMBER_OF_WORKERS}";
+    NUMBER_OF_WORKERS = "${params.NUMBER_OF_WORKERS?.trim() ?: ''}";
     BUILD_PSTRESS = "${params.BUILD_PSTRESS}";
-    QA_CONFIG_OVERRIDES = "${params.QA_CONFIG_OVERRIDES}";
-    QA_TIMEOUT_HOURS = "${params.QA_TIMEOUT_HOURS}";
-    INSTANCE_TYPE = "${params.INSTANCE_TYPE}";
+    QA_CONFIG_OVERRIDES = "${params.QA_CONFIG_OVERRIDES?.trim() ?: ''}";
+    QA_TIMEOUT_HOURS = "${params.QA_TIMEOUT_HOURS?.trim() ?: ''}";
+    INSTANCE_TYPE = "${params.INSTANCE_TYPE?.trim() ?: ''}";
   }
   parameters {
     string(
@@ -184,6 +188,16 @@ pipeline {
       description: 'Percona-QA/pstress branch (used only when pstress is built)'
     )
     string(
+      name: 'PERCONA_QA_REPO',
+      defaultValue: 'https://github.com/Percona-QA/percona-qa.git',
+      description: 'percona-qa git repository; only its randgen/ directory is fetched (config.ini randgen_dir)'
+    )
+    string(
+      name: 'PERCONA_QA_BRANCH',
+      defaultValue: 'master',
+      description: 'percona-qa branch for randgen'
+    )
+    string(
       name: 'TESTING_GIT_ACCOUNT',
       defaultValue: 'Percona-QA',
       description: 'GitHub account of the package-testing repo that holds molecule/pxc-qa-suites (use your fork until it is merged)'
@@ -221,8 +235,8 @@ pipeline {
       steps {
         script {
           def what = params.QA_TESTS?.trim() ? params.QA_TESTS.trim() : (params.QA_SUITES?.trim() ?: 'default-suites')
-          currentBuild.displayName = "${env.BUILD_NUMBER}-${params.PXC_VERSION}-${params.TEST_OS}"
-          currentBuild.description = "${what} | pxc-qa@${params.PXC_QA_BRANCH}"
+          currentBuild.displayName = "${env.BUILD_NUMBER}-${env.PXC_VERSION}-${params.TEST_OS}"
+          currentBuild.description = "${what} | pxc-qa@${env.PXC_QA_BRANCH}"
         }
       }
     }
@@ -230,7 +244,7 @@ pipeline {
     stage('Checkout') {
       steps {
         deleteDir()
-        git poll: false, branch: params.TESTING_BRANCH, url: "https://github.com/${params.TESTING_GIT_ACCOUNT}/package-testing.git"
+        git poll: false, branch: env.TESTING_BRANCH, url: "https://github.com/${env.TESTING_GIT_ACCOUNT}/package-testing.git"
       }
     }
 
@@ -263,7 +277,17 @@ pipeline {
       script {
         archiveArtifacts artifacts: "pxc_qa_logs_*.tar.gz", followSymlinks: false, allowEmptyArchive: true
         junit allowEmptyResults: true, testResults: "**/junit-pxc-qa-*.xml"
-        moleculeParallelPostDestroy(qaTestOSes(), env.MOLECULE_DIR)
+        // The molecule venv only exists once Prepare has run (not after a checkout failure).
+        // A destroy failure must not stop deleteBuildInstances() below from running.
+        if (fileExists('virtenv/bin/activate')) {
+          try {
+            moleculeParallelPostDestroy(qaTestOSes(), env.MOLECULE_DIR)
+          } catch (err) {
+            echo "molecule destroy failed (${err}); deleteBuildInstances() cleans up by tag"
+          }
+        } else {
+          echo 'Molecule virtualenv not created; skipping molecule destroy'
+        }
       }
       deleteBuildInstances()
     }
