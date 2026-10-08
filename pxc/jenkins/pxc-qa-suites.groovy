@@ -97,6 +97,7 @@ pipeline {
     QA_DEBUG = "${params.QA_DEBUG}";
     NUMBER_OF_WORKERS = "${params.NUMBER_OF_WORKERS?.trim() ?: ''}";
     BUILD_PSTRESS = "${params.BUILD_PSTRESS}";
+    INSTALL_PXB = "${params.INSTALL_PXB}";
     QA_CONFIG_OVERRIDES = "${params.QA_CONFIG_OVERRIDES?.trim() ?: ''}";
     QA_TIMEOUT_HOURS = "${params.QA_TIMEOUT_HOURS?.trim() ?: ''}";
     INSTANCE_TYPE = "${params.INSTANCE_TYPE?.trim() ?: ''}";
@@ -166,6 +167,11 @@ pipeline {
       name: 'BUILD_PSTRESS',
       defaultValue: false,
       description: 'Build pstress-pxc even if random_qa is not selected (it is built automatically for random_qa)'
+    )
+    booleanParam(
+      name: 'INSTALL_PXB',
+      defaultValue: false,
+      description: 'Install the Percona XtraBackup package even if replication/backup_replication.py is not selected (it is installed automatically when it can run)'
     )
     string(
       name: 'QA_CONFIG_OVERRIDES',
