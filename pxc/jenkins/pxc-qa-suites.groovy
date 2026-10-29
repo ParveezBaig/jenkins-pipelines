@@ -387,7 +387,8 @@ pipeline {
   }
   options {
     withCredentials(moleculepxcJenkinsCreds())
-    disableConcurrentBuilds()
+    // No disableConcurrentBuilds(): pxc-qa-suites-all runs four builds at once. Instance names,
+    // tags and cleanup are all per build number, so concurrent builds don't touch each other.
     disableResume()
     timeout(time: 24, unit: 'HOURS')
   }
@@ -475,21 +476,36 @@ pipeline {
   post {
     always {
       script {
-        archiveArtifacts artifacts: "pxc_qa_logs_*.tar.gz", followSymlinks: false, allowEmptyArchive: true
-        junit allowEmptyResults: true, testResults: "**/junit-pxc-qa-*.xml"
-        // The molecule venv only exists once Prepare has run (not after a checkout failure).
-        // A destroy failure must not stop deleteBuildInstances() below from running.
-        if (fileExists('virtenv/bin/activate')) {
-          try {
-            moleculeParallelPostDestroy(qaTestOSes(), env.MOLECULE_DIR)
-          } catch (err) {
-            echo "molecule destroy failed (${err}); deleteBuildInstances() cleans up by tag"
+        // The agent can be deleted mid-build (hcloud agents are); then no step here has a
+        // workspace and fails with MissingContextVariableException. The EC2 hosts would be left
+        // running, so they are cleaned up by tag from a new agent instead.
+        def agentLost = false
+        try {
+          archiveArtifacts artifacts: "pxc_qa_logs_*.tar.gz", followSymlinks: false, allowEmptyArchive: true
+          junit allowEmptyResults: true, testResults: "**/junit-pxc-qa-*.xml"
+          // The molecule venv only exists once Prepare has run (not after a checkout failure).
+          // A destroy failure must not stop deleteBuildInstances() below from running.
+          if (fileExists('virtenv/bin/activate')) {
+            try {
+              moleculeParallelPostDestroy(qaTestOSes(), env.MOLECULE_DIR)
+            } catch (err) {
+              echo "molecule destroy failed (${err}); deleteBuildInstances() cleans up by tag"
+            }
+          } else {
+            echo 'Molecule virtualenv not created; skipping molecule destroy'
+          }
+        } catch (org.jenkinsci.plugins.workflow.steps.MissingContextVariableException err) {
+          agentLost = true
+          echo "Build agent lost (${err.message}); no logs or junit collected, cleaning up EC2 instances from a new agent"
+        }
+        if (agentLost) {
+          node('deb12-x64-min') {
+            deleteBuildInstances()
           }
         } else {
-          echo 'Molecule virtualenv not created; skipping molecule destroy'
+          deleteBuildInstances()
         }
       }
-      deleteBuildInstances()
     }
   }
 }
